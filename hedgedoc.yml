@@ -1,0 +1,324 @@
+apiVersion: v1
+kind: Template
+labels:
+  app: hedgedoc
+  template: hedgedoc
+message: 'The following software have been deployed on https://${APPLICATION_DOMAIN}.'
+
+metadata:
+  annotations:
+    description: A deployment of Hedgedoc
+    iconClass: icon-python
+    openshift.io/display-name: Hedgedoc
+    openshift.io/documentation-url: https://hedgedoc.org
+    openshift.io/long-description: This template deploy hedgedoc using official container
+    openshift.io/provider-display-name: OSCI.io, Red Hat, Inc.
+    tags: quickstart
+    template.openshift.io/bindable: 'false'
+  name: hedgedoc
+objects:
+- apiVersion: v1
+  kind: Secret
+  metadata:
+    name: ${NAME}
+  stringData:
+    database-password: ${DATABASE_PASSWORD}
+    database-user: ${DATABASE_USER}
+
+
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      description: Exposes and load balances the application pods
+      service.alpha.openshift.io/dependencies: '[{"name": "postgresql", "kind": "Service"}]'
+    name: ${NAME}
+  spec:
+    ports:
+    - name: web
+      port: 8080
+      targetPort: 3000
+    selector:
+      name: ${NAME}
+
+- apiVersion: v1
+  kind: Route
+  metadata:
+    name: ${NAME}
+  spec:
+    host: ${APPLICATION_DOMAIN}
+    to:
+      kind: Service
+      name: ${NAME}
+
+- apiVersion: v1
+  kind: ImageStream
+  metadata:
+    annotations:
+      description: Keeps track of changes in the application image
+    name: ${NAME}
+  spec:
+    lookupPolicy:
+      local: false
+    tags:
+    - annotations: null
+      from:
+        kind: DockerImage
+        name: quay.io/hedgedoc/hedgedoc
+      generation: 2
+      importPolicy:
+        scheduled: true
+      name: latest
+      referencePolicy:
+        type: Source
+
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: ${NAME}
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${HEDGEDOC_VOLUME_CAPACITY}
+
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    annotations:
+      description: Defines how to deploy the application server
+      template.alpha.openshift.io/wait-for-ready: 'true'
+    name: ${NAME}
+  spec:
+    replicas: 1
+    selector:
+      name: ${NAME}
+    strategy:
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          name: ${NAME}
+        name: ${NAME}
+      spec:
+        containers:
+        - env:
+          - name: DB_PORT
+            value: $(POSTGRESQL_SERVICE_PORT)
+          - name: DB_HOST
+            value: $(POSTGRESQL_SERVICE_HOST)
+          - name: DB_NAME
+            value: ${DATABASE_NAME}
+          - name: DB_USER
+            valueFrom:
+              secretKeyRef:
+                key: database-user
+                name: ${NAME}
+
+          - name: DB_PASS
+            valueFrom:
+              secretKeyRef:
+                key: database-password
+                name: ${NAME}
+          - name: CMD_DB_URL
+            value: postgres://$(DB_USER):$(DB_PASS)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)
+ 
+          image: ''
+          livenessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 30
+            timeoutSeconds: 3
+          name: hedgedoc-psql-persistent
+          ports:
+          - containerPort: 3000
+          readinessProbe:
+            httpGet:
+              path: /
+              port: 3000
+            initialDelaySeconds: 3
+            timeoutSeconds: 3
+          resources:
+            limits:
+              memory: ${MEMORY_LIMIT}
+          volumeMounts:
+          - mountPath: /hedgedoc/public/uploads
+            name: hedgedoc-uploads
+        volumes:
+        - name: hedgedoc-uploads
+          persistentVolumeClaim:
+            claimName: ${NAME}
+ 
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - hedgedoc-psql-persistent
+        from:
+          kind: ImageStreamTag
+          name: ${NAME}:latest
+      type: ImageChange
+    - type: ConfigChange
+
+- apiVersion: v1
+  kind: PersistentVolumeClaim
+  metadata:
+    name: postgresql
+  spec:
+    accessModes:
+    - ReadWriteOnce
+    resources:
+      requests:
+        storage: ${POSTGRESQL_VOLUME_CAPACITY}
+
+- apiVersion: v1
+  kind: Service
+  metadata:
+    annotations:
+      description: Exposes the database server
+    name: postgresql
+  spec:
+    ports:
+    - name: postgresql
+      port: 5432
+      targetPort: 5432
+    selector:
+      name: postgresql
+
+- apiVersion: v1
+  kind: DeploymentConfig
+  metadata:
+    annotations:
+      description: Defines how to deploy the database
+      template.alpha.openshift.io/wait-for-ready: 'true'
+    name: postgresql
+  spec:
+    replicas: 1
+    selector:
+      name: postgresql
+    strategy:
+      type: Recreate
+    template:
+      metadata:
+        labels:
+          name: postgresql
+        name: postgresql
+      spec:
+        containers:
+        - env:
+          - name: POSTGRESQL_USER
+            valueFrom:
+              secretKeyRef:
+                key: database-user
+                name: ${NAME}
+          - name: POSTGRESQL_PASSWORD
+            valueFrom:
+              secretKeyRef:
+                key: database-password
+                name: ${NAME}
+          - name: POSTGRESQL_DATABASE
+            value: ${DATABASE_NAME}
+          image: ' '
+          livenessProbe:
+            exec:
+              command:
+              - /usr/libexec/check-container
+              - --live
+            initialDelaySeconds: 120
+            timeoutSeconds: 10
+          name: postgresql
+          ports:
+          - containerPort: 5432
+          readinessProbe:
+            exec:
+              command:
+              - /usr/libexec/check-container
+            initialDelaySeconds: 5
+            timeoutSeconds: 1
+          resources:
+            limits:
+              memory: ${MEMORY_POSTGRESQL_LIMIT}
+          volumeMounts:
+          - mountPath: /var/lib/pgsql/data
+            name: postgresql-data
+        volumes:
+        - name: postgresql-data
+          persistentVolumeClaim:
+            claimName: postgresql
+    triggers:
+    - imageChangeParams:
+        automatic: true
+        containerNames:
+        - postgresql
+        from:
+          kind: ImageStreamTag
+          name: postgresql:${POSTGRESQL_VERSION}
+          namespace: ${NAMESPACE}
+      type: ImageChange
+    - type: ConfigChange
+
+
+parameters:
+- description: The name assigned to all of the frontend objects defined in this template.
+  displayName: Name
+  name: NAME
+  required: true
+  value: hedgedoc
+
+- description: The OpenShift Namespace where the ImageStream resides.
+  displayName: Namespace
+  name: NAMESPACE
+  required: true
+  value: openshift
+
+
+- description: Version of PostgreSQL image to be used (10 or latest).
+  displayName: Version of PostgreSQL Image
+  name: POSTGRESQL_VERSION
+  required: true
+  value: '10'
+
+- description: Maximum amount of memory the application container can use.
+  displayName: Memory Limit
+  name: MEMORY_LIMIT
+  required: true
+  value: 1024Mi
+
+- description: Maximum amount of memory the database container can use.
+  displayName: Memory Limit (PostgreSQL)
+  name: MEMORY_POSTGRESQL_LIMIT
+  required: true
+  value: 512Mi
+
+- description: Volume space available for database, e.g. 512Mi, 2Gi
+  displayName: Volume Capacity
+  name: POSTGRESQL_VOLUME_CAPACITY
+  required: true
+  value: 1Gi
+
+- description: Volume space available for uploads, e.g. 512Mi, 2Gi
+  displayName: Volume Capacity
+  name: HEDGEDOC_VOLUME_CAPACITY
+  required: true
+  value: 1Gi
+
+- displayName: Database Name
+  name: DATABASE_NAME
+  required: true
+  value: hedgedoc
+
+- displayName: Database Username
+  name: DATABASE_USER
+  required: true
+  value: hedgedoc
+
+- displayName: Database User Password
+  from: '[a-zA-Z0-9]{16}'
+  generate: expression
+  name: DATABASE_PASSWORD
+
+- displayName: Hedgedoc Domain
+  name: APPLICATION_DOMAIN
+  value: ''
