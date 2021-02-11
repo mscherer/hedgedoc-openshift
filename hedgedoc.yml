@@ -105,6 +105,9 @@ objects:
       spec:
         containers:
         - env:
+          - name: CMD_PROTOCOL_USESSL
+            value: 'true'
+
           - name: DB_PORT
             value: $(POSTGRESQL_SERVICE_PORT)
           - name: DB_HOST
