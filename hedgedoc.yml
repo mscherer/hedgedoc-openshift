@@ -24,7 +24,8 @@ objects:
   stringData:
     database-password: ${DATABASE_PASSWORD}
     database-user: ${DATABASE_USER}
-
+    github-client-id: ${GITHUB_CLIENTID}
+    github-client-secret: ${GITHUB_CLIENT_SECRET}
 
 - apiVersion: v1
   kind: Service
@@ -121,8 +122,22 @@ objects:
               secretKeyRef:
                 key: database-password
                 name: ${NAME}
+
           - name: CMD_DB_URL
             value: postgres://$(DB_USER):$(DB_PASS)@$(DB_HOST):$(DB_PORT)/$(DB_NAME)
+
+          - name: CMD_GITHUB_CLIENTID
+            valueFrom:
+              secretKeyRef:
+                key: github-client-id
+                name: ${NAME}
+
+          - name: CMD_GITHUB_CLIENTSECRET
+            valueFrom:
+              secretKeyRef:
+                key: github-client-secret
+                name: ${NAME}
+
  
           image: ''
           livenessProbe:
@@ -321,4 +336,12 @@ parameters:
 
 - displayName: Hedgedoc Domain
   name: APPLICATION_DOMAIN
+  value: ''
+
+- displayName: Github Client ID
+  name: GITHUB_CLIENTID
+  value: ''
+
+- displayName: Github Client secret
+  name: GITHUB_CLIENT_SECRET
   value: ''
