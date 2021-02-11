@@ -107,7 +107,8 @@ objects:
         - env:
           - name: CMD_PROTOCOL_USESSL
             value: 'true'
-
+          - name: CMD_EMAIL
+            value: 'false' 
           - name: DB_PORT
             value: $(POSTGRESQL_SERVICE_PORT)
           - name: DB_HOST
